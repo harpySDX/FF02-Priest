@@ -434,48 +434,90 @@ let cards=[];
 async function generate(){
   const notes=document.getElementById('notesInput').value.trim();
   if(!notes){showErr('Please paste some notes first! 📄');return;}
-  setLoad(true); hideErr();
 
-  const modeInstr={
-    flashcard:`Generate exactly ${selCount} flashcard objects: type "flashcard", question (string, max 12 words), answer (string, max 18 words).`,
-    quiz:`Generate exactly ${selCount} quiz objects: type "quiz", question (string, max 12 words), options (array of exactly 4 short strings), correctIndex (0-3).`,
-    truefalse:`Generate exactly ${selCount} truefalse objects: type "truefalse", statement (string, max 14 words), isTrue (boolean).`,
-    mixed:`Generate ${selCount} mixed objects split roughly evenly between: type "flashcard" (question + answer), type "quiz" (question + options[4] + correctIndex), type "truefalse" (statement + isTrue).`
-  };
-
-  const prompt=`You are a quiz generator for a retro pixel-art study game. Based on the notes below, ${modeInstr[selMode]}
-
-Return ONLY a raw JSON array with no markdown, no explanation, no backticks. Keep all text very short — questions max 12 words, answers max 18 words, options max 6 words each.
-
-Example output:
-[
-  {"type":"flashcard","question":"Where does photosynthesis occur?","answer":"Inside chloroplasts in plant cells."},
-  {"type":"quiz","question":"What is the powerhouse of the cell?","options":["Nucleus","Mitochondria","Ribosome","Golgi body"],"correctIndex":1},
-  {"type":"truefalse","statement":"The sun is a red dwarf star.","isTrue":false}
-]
-
-NOTES:
-${notes.substring(0,3000)}`;
+  hideErr();
+  setLoad(true);
 
   try{
-    const res=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1500,messages:[{role:'user',content:prompt}]})
-    });
-    const data=await res.json();
-    if(data.error){showErr('API error: '+data.error.message);setLoad(false);return;}
-    const raw=data.content.map(b=>b.text||'').join('');
-    const m=raw.match(/\[[\s\S]*\]/);
-    if(!m){showErr('Couldn\'t parse questions. Try again!');setLoad(false);return;}
-    cards=JSON.parse(m[0]);
-    if(!cards.length){showErr('No cards generated. Try different notes.');setLoad(false);return;}
-    // Init game state
+    // 🧠 SIMPLE LOCAL "AI" GENERATOR
+    const sentences = notes
+      .replace(/\n/g, ' ')
+      .split(/[.!?]/)
+      .map(s => s.trim())
+      .filter(s => s.length > 20);
+
+    function rand(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+
+    cards = [];
+
+    for(let i=0;i<selCount;i++){
+      const s = rand(sentences) || "Sample fact for study.";
+      const words = s.split(' ');
+
+      // FLASHCARD
+      if(selMode==='flashcard' || (selMode==='mixed' && i%3===0)){
+        const key = words.slice(0,5).join(' ');
+        cards.push({
+          type:"flashcard",
+          question:`What is: ${key}?`,
+          answer:s.slice(0,120)
+        });
+      }
+
+      // QUIZ
+      else if(selMode==='quiz' || (selMode==='mixed' && i%3===1)){
+        const correct = words[Math.floor(words.length/2)] || "term";
+
+        let options = new Set([correct]);
+        while(options.size < 4){
+          const w = rand(words) || "word";
+          if(w.length > 3) options.add(w);
+        }
+
+        options = Array.from(options).sort(()=>Math.random()-0.5);
+
+        cards.push({
+          type:"quiz",
+          question:`Fill missing word: "${s.replace(correct,'_____')}"`,
+          options: options.slice(0,4),
+          correctIndex: options.indexOf(correct)
+        });
+      }
+
+      // TRUE/FALSE
+      else{
+        const flip = Math.random() > 0.5;
+        let statement = s;
+
+        if(flip){
+          const w = rand(words);
+          statement = s.replace(w, "random");
+        }
+
+        cards.push({
+          type:"truefalse",
+          statement: statement.slice(0,120),
+          isTrue: !flip
+        });
+      }
+    }
+
+    if(!cards.length){
+      showErr('Could not generate cards. Try different notes.');
+      setLoad(false);
+      return;
+    }
+
+    // 🎮 START GAME
     lives=selLives; score=0; cardIdx=0; answered=false; flashRevealed=false;
     switchTab('game');
     resetOvs(); showOv('startOv');
     renderHUD(); initCanvas();
-  }catch(e){showErr('Error: '+e.message);}
+
+  }catch(e){
+    showErr('Error: '+e.message);
+  }
+
   setLoad(false);
 }
 
